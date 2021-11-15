@@ -1,0 +1,290 @@
+<html>
+
+<head>
+  <meta content="text/html;charset=utf-8" http-equiv="Content-Type" />
+
+  <title>QZ Tray Sample Page</title>
+  <!-- Required scripts -->
+  <script type="text/javascript" src="js/qz-tray.js"></script>
+
+  <!-- Pollyfills -->
+  <script type="text/javascript" src="js/promise-polyfill-8.1.3.min.js"></script>
+  <script type="text/javascript" src="js/whatwg-fetch-3.0.0.min.js"></script>
+
+  <!-- Page styling -->
+  <script type="text/javascript" src="js/jquery-1.11.3.min.js"></script>
+  <script type="text/javascript" src="js/bootstrap.min.js"></script>
+  <link rel="stylesheet" href="css/font-awesome.min.css" />
+  <link rel="stylesheet" href="css/bootstrap.min.css" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+
+<body>
+
+  <div class="container" role="main">
+    <div class="row">
+      <h1 id="title" class="page-header">
+        QZ Tray v<span id="qz-version">0</span>
+      </h1>
+    </div>
+
+    <div class="row spread">
+      <div class="col-md-4">
+        <div id="qz-connection" class="panel panel-primary">
+          <div class="panel-heading">
+            <h3 class="panel-title">
+              Connection
+            </h3>
+          </div>
+          <div class="panel-body">
+            Status: <span id="qz-status"></span>
+            <div class="form-group" id="connectionGroup">
+              <label for="connectionHost">Connect to host:</label>
+              <input type="text" id="connectionHost" value="localhost" class="form-control" />
+            </div>
+            <div class="form-group form-inline">
+              <label for="connectionUsingSecure" data-toggle="tooltip"
+                title="HTTPS Only: When disabled, allows secure pages to connect to insecure locations.">
+                Secure
+              </label>
+              <input checked type="checkbox" id="connectionUsingSecure" class="pull-right" />
+            </div>
+            <button type="button" id="launch-btn" class="btn btn-primary" data-toggle="tooltip" title="External Link"
+              onclick="launchQZ();">Launch QZ</button>
+            <button type="button" id="connect-btn" class="btn btn-success"
+              onclick="startConnection({ retries: 5, delay: 1 });">Connect</button>
+            <button type="button" id="disconnect-btn" class="btn btn-warning"
+              onclick="endConnection();">Disconnect</button>
+          </div>
+        </div>
+
+        <hr />
+
+
+        <div class="panel panel-primary">
+          <div class="panel-heading">
+            <h3 class="panel-title">Printer</h3>
+          </div>
+
+          <div class="panel-body">
+            <div class="form-group">
+              <label for="printer">Select printer:</label>
+              <select id="printer" class="form-control">
+              </select>
+            </div>
+            <div class="form-group">
+              <button type="button" class="btn btn-default" onclick="detailPrinters();">Get Printer Details</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel panel-primary">
+          <div class="panel-heading">
+            <h3 class="panel-title">Tests</h3>
+          </div>
+
+          <div class="panel-body">
+            <button type="button" id="load-html-btn" class="btn btn-warning" onclick="loadHTML();">Load HTML</button>
+            <button type="button" id="print-html-btn" class="btn btn-warning" onclick="printHTML();">Print HTML</button>
+            <button type="button" id="load-pdf-btn" class="btn btn-warning" onclick="loadPDF();">Load PDF</button>
+            <button type="button" id="print-pdf-btn" class="btn btn-warning" onclick="printPDF();">Print PDF</button>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-8">
+        <div class="panel panel-warning">
+          <div class="panel-heading">
+            <h3 class="panel-title" id="panel-content-head"></h3>
+          </div>
+
+          <div class="panel-body">
+            <div id="panel-content-body"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+
+<script type="text/javascript">
+  const CERTIFICATE_PRINTER = "certificates/digital-certificate.txt";
+  const CERTIFICATE_PRINTER_SERVER = "/qzdemo/assets/signing/sign-message.php";
+
+  var configPrint = '';
+
+  /// Connection ///
+  function launchQZ() {
+    if (!qz.websocket.isActive()) {
+      /// Authentication setup ///
+      qz.security.setCertificatePromise(function (resolve, reject) {
+        //Preferred method - from server
+        fetch(CERTIFICATE_PRINTER, { cache: 'no-store', headers: { 'Content-Type': 'text/plain' } })
+          .then(function (data) { data.ok ? resolve(data.text()) : reject(data.text()); });
+      });
+
+      qz.security.setSignatureAlgorithm("SHA512"); // Since 2.1
+      qz.security.setSignaturePromise(function (toSign) {
+        return function (resolve, reject) {
+          //Preferred method - from server
+          fetch(CERTIFICATE_PRINTER_SERVER + "?request=" + toSign, { cache: 'no-store', headers: { 'Content-Type': 'text/plain' } })
+            .then(function (data) { data.ok ? resolve(data.text()) : reject(data.text()); });
+        };
+      });
+
+      //window.location.assign("qz:launch");
+      $("#qz-status").html('Launched');
+      $("#launch-btn").hide();
+      $("#connect-btn").show();
+      $("#disconnect-btn").hide();
+      //Retry 5 times, pausing 1 second between each attempt
+      //startConnection({ retries: 5, delay: 1 });
+    }
+  }
+
+  function startConnection(config) {
+    var host = $('#connectionHost').val().trim();
+    var usingSecure = $("#connectionUsingSecure").prop('checked');
+
+    // Connect to a print-server instance, if specified
+    if (host != "" && host != 'localhost') {
+      if (config) {
+        config.host = host;
+        config.usingSecure = usingSecure;
+      } else {
+        config = { host: host, usingSecure: usingSecure };
+      }
+    }
+
+    if (!qz.websocket.isActive()) {
+      $("#qz-status").html('Connecting to ' + host);
+
+      qz.websocket.connect(config).then(function () {
+        $("#qz-status").html('Connected to ' + host);
+        $("#launch-btn").hide();
+        $("#connect-btn").hide();
+        $("#disconnect-btn").show();
+        listPrinters();
+      }).catch(displayError);
+    } else {
+      $("#qz-status").html('Disconnected');
+      displayError('An active connection with QZ already exists.');
+    }
+  }
+
+  function endConnection() {
+    if (qz.websocket.isActive()) {
+      qz.websocket.disconnect().then(function () {
+        $("#qz-status").html('Disconnected');
+        $("#launch-btn").hide();
+        $("#connect-btn").show();
+        $("#disconnect-btn").hide();
+      }).catch(displayError);
+    } else {
+      displayError('No active connection with QZ exists.');
+    }
+  }
+
+  //helpers
+  function displayError(err) {
+    console.error(err);
+    alert(err);
+  }
+
+  function listPrinters() {
+    const selectPrinter = document.querySelector('#printer');
+    qz.printers.find().then(function (data) {
+      data.forEach(printer => {
+        // create a new option
+        const option = new Option(printer, printer);
+        // add it to the list
+        selectPrinter.add(option, undefined); printer
+      });
+    }).catch(displayError);
+  }
+
+  $("#printer").on('change', function (event) {
+    console.log(event.target.value);
+    qz.printers.find(event.target.value).then(function (printer) {
+      configPrint = qz.configs.create(printer);
+    });
+  });
+
+  function setPrinter() { }
+
+  function detailPrinters() {
+    qz.printers.details().then(function (data) {
+      let list = '';
+      data.forEach(printer => {
+        list += "<li>" + (printer.default ? "* " : "") + printer.name + "<ul>" +
+          "<li><strong>Driver:</strong> " + printer.driver + "</li>" +
+          "<li><strong>Density:</strong> " + printer.density + "dpi</li>" +
+          "<li><strong>Connection:</strong> " + printer.connection + "</li>" +
+          (printer.trays ? "<li><strong>Trays:</strong> " + printer.trays + "</li>" : "") +
+          "</ul></li>";
+
+      });
+      loadContent("Printer details", list);
+    }).catch(displayError);
+  }
+
+
+  function loadHTML() {
+    fetch("assets/print/html_sample.html", { cache: 'no-store', headers: { 'Content-Type': 'text/plain' } })
+      .then(async function (data) {
+        if (data.ok) {
+          data.text().then(function (result) {
+            loadContent("Test Print HTML", result);
+          });
+        } else {
+          loadContent("ERROR", "ERROR al cargar el HTML");
+        }
+      });
+  }
+  function loadPDF() {
+    /*fetch("assets/print/pdf_sample.pdf", { headers: { 'Content-Type': 'text/plain' } })
+    .then(function (data) { return data.blob() })
+    .then(function(blob){*/
+      //let url = window.URL.createObjectURL(blob);
+      let iframe = document.createElement("iframe")
+      iframe.setAttribute('src',"assets/print/pdf_sample.pdf");
+      iframe.setAttribute('type',"aplication/pdf");
+      loadContent("PDF",iframe);
+      //$("#panel-content-body").append(iframe);
+      //$("#panel-content-head").html("PDF");
+    //});
+  }
+
+  function loadContent(head = "", body = "") {
+    $("#panel-content-head").html(head);
+    $("#panel-content-body").html(body);
+  }
+
+  function printHTML() {
+    let data = [{
+      type: 'pixel',
+      format: 'html',
+      flavor: 'plain',
+      data: $("#panel-content-body").html(),
+    }];
+    qz.print(configPrint, data).catch(displayError);
+  }
+  function printPDF() {
+    let data = [{
+      type: 'pixel',
+      format: 'pdf',
+      flavor: 'file',
+      data: "assets/print/pdf_sample.pdf",
+    }];
+    qz.print(configPrint, data).catch(displayError);;
+  }
+
+  $(document).ready(function () {
+    $("#launch-btn").show();
+    $("#connect-btn").hide();
+    $("#disconnect-btn").hide();
+    launchQZ();
+    //startConnection({ retries: 5, delay: 1 });
+  });
+</script>
+
+</html>
